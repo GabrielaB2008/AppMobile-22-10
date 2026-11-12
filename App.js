@@ -114,8 +114,9 @@ const money = (value) =>
   });
 
 export default function App() {
-  const [screen, setScreen] = useState("home");
+  const [screen, setScreen] = useState("login");
   const [previousScreen, setPreviousScreen] = useState("home");
+  const [navigationHistory, setNavigationHistory] = useState([]);
 
   const [user, setUser] = useState(null);
   const [nameInput, setNameInput] = useState("");
@@ -133,10 +134,19 @@ export default function App() {
 
   const [cart, setCart] = useState([]);
   const [deliveryType, setDeliveryType] = useState("Entrega");
-  const [address, setAddress] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Pix");
   const [coupon, setCoupon] = useState("");
   const [discount, setDiscount] = useState(0);
+
+  const [cep, setCep] = useState("");
+  const [street, setStreet] = useState("");
+  const [neighborhood, setNeighborhood] = useState("");
+  const [city, setCity] = useState("");
+  const [uf, setUf] = useState("");
+  const [number, setNumber] = useState("");
+  const [complement, setComplement] = useState("");
+  const [address, setAddress] = useState("");
+  const [loadingCep, setLoadingCep] = useState(false);
 
   const [orders, setOrders] = useState([]);
   const [points, setPoints] = useState(120);
@@ -144,6 +154,7 @@ export default function App() {
   const [rating, setRating] = useState(5);
 
   const [chatInput, setChatInput] = useState("");
+  const [chatMenuVisible, setChatMenuVisible] = useState(false);
   const [chatMessages, setChatMessages] = useState([
     {
       from: "bot",
@@ -152,35 +163,105 @@ export default function App() {
   ]);
 
   const [clubActive, setClubActive] = useState(false);
+  const [selectedClubPlan, setSelectedClubPlan] = useState(null);
   const [sharedCode, setSharedCode] = useState("");
   const [sharedPeople, setSharedPeople] = useState([]);
   const [sharedName, setSharedName] = useState("");
   const [sharedItems, setSharedItems] = useState([]);
-  const [adminMode, setAdminMode] = useState(false);
-
-  const [newProductName, setNewProductName] = useState("");
-  const [newProductPrice, setNewProductPrice] = useState("");
 
   const subtotal = cart.reduce(
     (sum, item) => sum + item.price * item.quantity,
     0
   );
 
+  const atualizarEndereco = (rua, bairro, cidade, estado, num, comp) => {
+  const partes = [
+    rua,
+    num ? `nº ${num}` : "",
+    comp,
+    bairro,
+    cidade && estado ? `${cidade} - ${estado}` : cidade,
+  ].filter(Boolean);
+
+  setAddress(partes.join(", "));
+};
+
+const buscarCep = async (valor) => {
+  const cepLimpo = valor.replace(/\D/g, "");
+
+  if (cepLimpo.length !== 8) {
+    Alert.alert("GANA Pasta", "Digite um CEP válido com 8 dígitos.");
+    return;
+  }
+
+  try {
+    setLoadingCep(true);
+    const response = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
+    const data = await response.json();
+
+    if (data.erro) {
+      Alert.alert("GANA Pasta", "CEP não encontrado. Verifique e tente novamente.");
+      return;
+    }
+
+    setStreet(data.logradouro || "");
+    setNeighborhood(data.bairro || "");
+    setCity(data.localidade || "");
+    setUf(data.uf || "");
+
+    atualizarEndereco(
+      data.logradouro || "",
+      data.bairro || "",
+      data.localidade || "",
+      data.uf || "",
+      number,
+      complement
+    );
+  } catch (error) {
+    console.error(error);
+    Alert.alert("GANA Pasta", "Erro ao buscar o CEP. Tente novamente.");
+  } finally {
+    setLoadingCep(false);
+  }
+};
+
+const formatarCep = (texto) => {
+  const limpo = texto.replace(/\D/g, "").slice(0, 8);
+  let formatado = limpo;
+  if (limpo.length > 5) {
+    formatado = `${limpo.slice(0, 5)}-${limpo.slice(5)}`;
+  }
+  setCep(formatado);
+
+  if (limpo.length === 8) {
+    buscarCep(limpo);
+  }
+};
+
   const deliveryFee = deliveryType === "Entrega" && cart.length > 0 ? 5.9 : 0;
   const total = Math.max(0, subtotal + deliveryFee - discount);
 
   const navigate = (destination) => {
+    if (destination === screen) return;
+    setNavigationHistory((history) => [...history, screen]);
     setPreviousScreen(screen);
     setScreen(destination);
   };
 
   const goBack = () => {
-    if (screen === "product" && selectedProduct) {
-      setScreen(previousScreen === "product" ? "home" : previousScreen);
+    if (navigationHistory.length > 0) {
+      const destination = navigationHistory[navigationHistory.length - 1];
+      setNavigationHistory(navigationHistory.slice(0, -1));
+      setPreviousScreen(
+        navigationHistory.length > 1
+          ? navigationHistory[navigationHistory.length - 2]
+          : "home"
+      );
+      setScreen(destination);
       return;
     }
 
-    setScreen("home");
+    if (screen !== "home") setScreen("home");
   };
 
   const showNotice = (message) => {
@@ -202,18 +283,19 @@ export default function App() {
     setEmailInput("");
     setPasswordInput("");
 
-    setAdminMode(false);
+    setNavigationHistory([]);
     setScreen("home");
   };
 
   const logout = () => {
     setUser(null);
-    setAdminMode(false);
-    setScreen("home");
+    setNavigationHistory([]);
+    setScreen("login");
   };
 
   const openProduct = (product) => {
     setPreviousScreen(screen);
+    setNavigationHistory((history) => [...history, screen]);
     setSelectedProduct(product);
     setRemovedIngredients([]);
     setQuantity(1);
@@ -233,11 +315,8 @@ export default function App() {
     };
 
     setCart((oldCart) => [...oldCart, item]);
-    setSelectedProduct(null);
     setQuantity(1);
-    setScreen("cart");
-
-    showNotice("Produto adicionado ao carrinho!");
+    setScreen("afterAdd");
   };
 
   const changeCartQuantity = (cartId, amount) => {
@@ -284,17 +363,46 @@ export default function App() {
       deliveryType,
       address: deliveryType === "Entrega" ? address : "Retirada no restaurante",
       paymentMethod,
-      status: "Recebido",
+      status: "Pedido confirmado",
       date: new Date().toLocaleString("pt-BR"),
       feedback: "",
     };
 
     setOrders((oldOrders) => [newOrder, ...oldOrders]);
+
+    // Demonstração local do acompanhamento do pedido.
+    setTimeout(() => {
+      setOrders((oldOrders) => oldOrders.map((order) =>
+        order.id === newOrder.id ? { ...order, status: "Em preparo" } : order
+      ));
+    }, 10000);
+
+    setTimeout(() => {
+      setOrders((oldOrders) => oldOrders.map((order) =>
+        order.id === newOrder.id
+          ? { ...order, status: deliveryType === "Entrega" ? "Saiu para entrega" : "Pronto para retirada" }
+          : order
+      ));
+    }, 25000);
+
+    setTimeout(() => {
+      setOrders((oldOrders) => oldOrders.map((order) =>
+        order.id === newOrder.id ? { ...order, status: "Concluído" } : order
+      ));
+    }, 45000);
     setPoints((oldPoints) => oldPoints + Math.floor(total));
     setCart([]);
     setCoupon("");
     setDiscount(0);
-    setScreen("orders");
+    setCep("");
+    setStreet("");
+    setNeighborhood("");
+    setCity("");
+    setUf("");
+    setNumber("");
+    setComplement("");
+    setAddress("");
+    navigate("orders");
 
     showNotice("Pedido realizado com sucesso! Obrigado por escolher a GANA Pasta.");
   };
@@ -304,26 +412,94 @@ export default function App() {
     if (!message) return;
 
     const lower = message.toLowerCase();
+    const normalized = lower.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    // O Pastechat entende pedidos simples escritos em linguagem natural.
+    const productAliases = [
+      { id: "1", terms: ["spaghetti", "bolonhesa"] },
+      { id: "2", terms: ["fettuccine", "alfredo"] },
+      { id: "3", terms: ["penne", "ao sugo", "sugo"] },
+      { id: "4", terms: ["lasanha"] },
+      { id: "5", terms: ["ravioli"] },
+      { id: "6", terms: ["pesto", "macarrao ao pesto"] },
+      { id: "7", terms: ["tiramisu"] },
+      { id: "8", terms: ["refrigerante", "refri"] },
+    ];
+
+    const matchedProducts = productAliases
+      .map((entry) => ({
+        product: PRODUCTS.find((item) => item.id === entry.id),
+        terms: entry.terms,
+      }))
+      .filter(({ terms }) =>
+        terms.some((term) =>
+          normalized.includes(
+            term.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          )
+        )
+      );
+
+    const asksToOrder =
+      /(quero|gostaria|vou querer|pode pedir|adiciona|adicionar|coloca|colocar|me ve|me vê|manda|pedir|pedido)/.test(normalized);
+
+    const asksToCheckout =
+      /(finalizar|fechar|concluir|ir para o carrinho|ver carrinho|pagar)/.test(normalized);
 
     let reply =
       "Que tal experimentar nosso Spaghetti à Bolonhesa? É um dos favoritos da casa! 🍝";
 
-    if (lower.includes("vegetar") || lower.includes("sem carne")) {
-      reply =
-        "Você pode experimentar o Penne ao Sugo ou o Macarrão ao Pesto. Confira os ingredientes antes de pedir! 🌿";
-    } else if (lower.includes("doce") || lower.includes("sobremesa")) {
-      reply =
-        "Temos Tiramisù para deixar sua refeição ainda mais especial! 🍰";
-    } else if (lower.includes("barato") || lower.includes("preço")) {
-      reply =
-        "O Penne ao Sugo é uma das opções mais econômicas do nosso cardápio. 😊";
-    } else if (lower.includes("pedido")) {
+    if (asksToCheckout) {
+      if (cart.length > 0) {
+        setChatMessages((oldMessages) => [
+          ...oldMessages,
+          { from: "user", text: message },
+          {
+            from: "bot",
+            text: "Perfeito! Vou abrir seu carrinho para você revisar os itens, escolher entrega ou retirada e finalizar seu pedido. 🛒",
+          },
+        ]);
+        setChatInput("");
+        navigate("cart");
+        return;
+      }
+      reply = "Seu carrinho ainda está vazio. Diga o nome de uma massa ou bebida que deseja pedir e eu adiciono para você! 🍝";
+    } else if (matchedProducts.length > 0 && asksToOrder) {
+      const quantityMatch = normalized.match(/\b(\d+)\b/);
+      const requestedQuantity = quantityMatch
+        ? Math.max(1, Math.min(20, Number(quantityMatch[1])))
+        : 1;
+
+      const itemsToAdd = matchedProducts.map(({ product }) => ({
+        ...product,
+        cartId: `${product.id}-${Date.now()}-${Math.random()}`,
+        quantity: requestedQuantity,
+        removedIngredients: [],
+        notes: "",
+      }));
+
+      setCart((oldCart) => [...oldCart, ...itemsToAdd]);
+      const addedNames = itemsToAdd
+        .map((item) => `${item.quantity}x ${item.name}`)
+        .join(", ");
+
+      reply = `Prontinho! Adicionei ${addedNames} ao seu carrinho. 😊 Você pode pedir mais alguma coisa ou escrever “finalizar pedido” para revisar o carrinho e concluir a compra.`;
+    } else if (matchedProducts.length > 0) {
+      reply = `Temos ${matchedProducts.map(({ product }) => product.name).join(" e ")}! Para colocar no carrinho, diga, por exemplo: “Quero 2 ${matchedProducts[0].product.name}”.`;
+    } else if (/(vegetar|sem carne)/.test(normalized)) {
+      reply = "Você pode experimentar o Penne ao Sugo ou o Macarrão ao Pesto. Confira os ingredientes antes de pedir! 🌿";
+    } else if (/(doce|sobremesa)/.test(normalized)) {
+      reply = "Temos Tiramisù para deixar sua refeição ainda mais especial! 🍰 Se quiser, diga “quero um tiramisù” que eu adiciono ao carrinho.";
+    } else if (/(barato|preco)/.test(normalized)) {
+      reply = "O Penne ao Sugo é uma das opções mais econômicas da casa. Se quiser pedir, diga “quero um Penne ao Sugo”. 😊";
+    } else if (/(pedido|status)/.test(normalized)) {
       reply =
         orders.length > 0
           ? `Seu pedido mais recente é o #${orders[0].id} e está com status: ${orders[0].status}.`
-          : "Você ainda não tem pedidos. Que tal escolher uma massa deliciosa?";
-    } else if (lower.includes("oi") || lower.includes("olá")) {
-      reply = "Olá! Que bom ter você aqui! Como posso ajudar?";
+          : "Você ainda não tem pedidos. Posso ajudar! Diga o nome do prato que deseja pedir.";
+    } else if (/(oi|ola|bom dia|boa tarde|boa noite)/.test(normalized)) {
+      reply = "Olá! 😊 Você pode me dizer o que deseja comer. Por exemplo: “Quero 1 Spaghetti à Bolonhesa”.";
+    } else if (asksToOrder) {
+      reply = "Claro! Qual prato você deseja? Temos Spaghetti à Bolonhesa, Fettuccine Alfredo, Penne ao Sugo, Lasanha, Ravioli, Macarrão ao Pesto, Tiramisù e refrigerante.";
     }
 
     setChatMessages((oldMessages) => [
@@ -340,7 +516,7 @@ export default function App() {
     setSharedCode(code);
     setSharedPeople([user?.name || "Organizador"]);
     setSharedItems([]);
-    setScreen("shared");
+    navigate("shared");
     showNotice(`Seu pedido compartilhado foi criado! Código: ${code}`);
   };
 
@@ -395,59 +571,11 @@ export default function App() {
     setSharedItems([]);
     setSharedCode("");
     setSharedPeople([]);
-    setScreen("cart");
+    navigate("cart");
 
     showNotice(
       `Os itens foram enviados ao carrinho. Total dos itens compartilhados: ${money(sharedTotal)}. Revise e finalize o pagamento.`
     );
-  };
-
-  const addAdminProduct = () => {
-    const price = Number(newProductPrice.replace(",", "."));
-
-    if (!newProductName.trim() || !Number.isFinite(price) || price <= 0) {
-      showNotice("Informe um nome e um preço válido.");
-      return;
-    }
-
-    const newProduct = {
-      id: String(Date.now()),
-      name: newProductName.trim(),
-      category: "Massas",
-      price,
-      emoji: "🍝",
-      description: "Uma novidade deliciosa da GANA Pasta.",
-      ingredients: ["Massa", "Molho da casa"],
-      popular: false,
-    };
-
-    setProducts((oldProducts) => [...oldProducts, newProduct]);
-    setNewProductName("");
-    setNewProductPrice("");
-    showNotice("Produto adicionado ao cardápio!");
-  };
-
-  const updateOrderStatus = (orderId, status) => {
-    setOrders((oldOrders) =>
-      oldOrders.map((order) =>
-        order.id === orderId ? { ...order, status } : order
-      )
-    );
-  };
-
-  const deleteProduct = (productId) => {
-    Alert.alert("Remover produto", "Deseja remover este produto do cardápio?", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Remover",
-        style: "destructive",
-        onPress: () => {
-          setProducts((oldProducts) =>
-            oldProducts.filter((product) => product.id !== productId)
-          );
-        },
-      },
-    ]);
   };
 
   const Button = ({
@@ -494,7 +622,7 @@ export default function App() {
         {subtitle ? <Text style={styles.pageSubtitle}>{subtitle}</Text> : null}
       </View>
 
-      <TouchableOpacity onPress={() => setScreen("cart")} style={styles.cartIcon}>
+      <TouchableOpacity onPress={() => navigate("cart")} style={styles.cartIcon}>
         <Text style={styles.cartIconText}>🛒</Text>
         {cart.length > 0 && (
           <View style={styles.cartBadge}>
@@ -527,6 +655,45 @@ export default function App() {
         <Text style={styles.addCircleText}>+</Text>
       </View>
     </TouchableOpacity>
+  );
+
+  const renderLogin = () => (
+    <ScrollView contentContainerStyle={styles.authContainer}>
+      <View style={styles.authCard}>
+        <View style={styles.authLogo}>
+          <Text style={{ fontSize: 66 }}>🐔</Text>
+        </View>
+        <Text style={styles.authBrand}>GANA PASTA</Text>
+        <Text style={styles.authSubtitle}>Sua experiência italiana começa aqui.</Text>
+        <Text style={styles.authTitle}>Entre ou crie sua conta</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Seu nome"
+          placeholderTextColor={COLORS.gray}
+          value={nameInput}
+          onChangeText={setNameInput}
+          autoCapitalize="words"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="E-mail"
+          placeholderTextColor={COLORS.gray}
+          value={emailInput}
+          onChangeText={setEmailInput}
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Senha"
+          placeholderTextColor={COLORS.gray}
+          value={passwordInput}
+          onChangeText={setPasswordInput}
+          secureTextEntry
+        />
+        <Button title="Entrar / Criar conta" onPress={login} style={{ marginTop: 5 }} />
+      </View>
+    </ScrollView>
   );
 
   const renderHome = () => {
@@ -876,6 +1043,39 @@ export default function App() {
     );
   };
 
+  const renderAfterAdd = () => (
+    <View style={{ flex: 1 }}>
+      <Header title="Pedido atualizado" subtitle="Seu produto foi adicionado" />
+      <View style={[styles.content, styles.afterAddContent]}>
+        <Text style={{ fontSize: 66 }}>🍝</Text>
+        <Text style={styles.afterAddTitle}>Adicionado ao carrinho!</Text>
+        <Text style={styles.afterAddDescription}>
+          Quer adicionar mais alguma coisa ou prefere revisar seu carrinho?
+        </Text>
+
+        <Button
+          title="＋ Adicionar mais alguma coisa"
+          onPress={() => {
+            const destination = previousScreen || "chat";
+            setNavigationHistory((history) =>
+              history.length > 0 ? history.slice(0, -1) : history
+            );
+            setSelectedProduct(null);
+            setScreen(destination);
+          }}
+          style={{ marginTop: 18 }}
+        />
+
+        <Button
+          title="Ir para o carrinho"
+          variant="gold"
+          onPress={() => navigate("cart")}
+          style={{ marginTop: 12 }}
+        />
+      </View>
+    </View>
+  );
+
   const renderCart = () => (
     <ScrollView>
       <Header title="Meu carrinho" subtitle="Revise seu pedido" />
@@ -983,17 +1183,86 @@ export default function App() {
             </View>
 
             {deliveryType === "Entrega" && (
-              <>
-                <Text style={styles.label}>Endereço de entrega</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Rua, número, bairro e complemento"
-                  placeholderTextColor={COLORS.gray}
-                  value={address}
-                  onChangeText={setAddress}
-                />
-              </>
-            )}
+  <>
+    <Text style={styles.label}>CEP</Text>
+    <View style={{ flexDirection: "row", alignItems: "center" }}>
+      <TextInput
+        style={[styles.input, { flex: 1, marginBottom: 0 }]}
+        placeholder="00000-000"
+        placeholderTextColor={COLORS.gray}
+        value={cep}
+        onChangeText={formatarCep}
+        keyboardType="numeric"
+        maxLength={9}
+      />
+      <Button
+        title={loadingCep ? "..." : "Buscar"}
+        onPress={() => buscarCep(cep)}
+        style={{ marginLeft: 8 }}
+      />
+    </View>
+
+    {street ? (
+      <>
+        <Text style={styles.label}>Rua</Text>
+        <TextInput
+          style={styles.input}
+          value={street}
+          onChangeText={(v) => {
+            setStreet(v);
+            atualizarEndereco(v, neighborhood, city, uf, number, complement);
+          }}
+          placeholder="Logradouro"
+          placeholderTextColor={COLORS.gray}
+        />
+
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.label}>Número</Text>
+            <TextInput
+              style={styles.input}
+              value={number}
+              onChangeText={(v) => {
+                setNumber(v);
+                atualizarEndereco(street, neighborhood, city, uf, v, complement);
+              }}
+              placeholder="Nº"
+              placeholderTextColor={COLORS.gray}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={{ flex: 2 }}>
+            <Text style={styles.label}>Complemento</Text>
+            <TextInput
+              style={styles.input}
+              value={complement}
+              onChangeText={(v) => {
+                setComplement(v);
+                atualizarEndereco(street, neighborhood, city, uf, number, v);
+              }}
+              placeholder="Apto, bloco..."
+              placeholderTextColor={COLORS.gray}
+            />
+          </View>
+        </View>
+
+        <Text style={styles.label}>Bairro</Text>
+        <TextInput
+          style={styles.input}
+          value={neighborhood}
+          editable={false}
+        />
+
+        <Text style={styles.label}>Cidade / UF</Text>
+        <TextInput
+          style={styles.input}
+          value={city && uf ? `${city} - ${uf}` : city}
+          editable={false}
+        />
+      </>
+    ) : null}
+  </>
+)}
 
             <Text style={[styles.sectionTitle, { marginTop: 20 }]}>
               Cupom de desconto
@@ -1149,30 +1418,12 @@ export default function App() {
                 variant="outline"
                 onPress={() => {
                   setFeedback("");
-                  setScreen("feedback");
+                  navigate("feedback");
                 }}
                 style={{ marginTop: 12 }}
               />
 
-              {adminMode && (
-                <View style={{ marginTop: 15 }}>
-                  <Text style={styles.label}>Atualizar status (admin)</Text>
-                  {[
-                    "Recebido",
-                    "Em preparo",
-                    "Saiu para entrega",
-                    "Concluído",
-                  ].map((status) => (
-                    <TouchableOpacity
-                      key={status}
-                      onPress={() => updateOrderStatus(order.id, status)}
-                      style={styles.adminStatusButton}
-                    >
-                      <Text style={styles.adminStatusText}>{status}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
+
             </View>
           ))
         )}
@@ -1182,86 +1433,267 @@ export default function App() {
     </ScrollView>
   );
 
+  const handlePastechatAction = (action, product = null) => {
+    const addConversation = (question, answer, suggestedProduct = null) => {
+      setChatMessages((old) => [
+        ...old,
+        { from: "user", text: question },
+        {
+          from: "bot",
+          text: answer,
+          suggestedProduct,
+        },
+      ]);
+    };
+
+    if (action === "menu") {
+      const nextVisible = !chatMenuVisible;
+      setChatMenuVisible(nextVisible);
+      if (nextVisible) {
+        addConversation(
+          "Quero ver o cardápio",
+          "Claro! Aqui estão todas as opções da GANA Pasta. Escolha seu prato e toque em “Adicionar” para personalizar seu pedido. 🍝"
+        );
+      }
+      return;
+    }
+
+    if (action === "recommend") {
+      const recommendation = PRODUCTS.find((item) => item.id === "2") || PRODUCTS[0];
+      addConversation(
+        "Qual massa você recomenda?",
+        `Eu recomendo o ${recommendation.name}! É uma ótima escolha para quem gosta de uma massa saborosa. 😋`,
+        recommendation
+      );
+      return;
+    }
+
+    if (action === "vegetarian") {
+      const vegetarianOptions = PRODUCTS.filter((item) =>
+        ["3", "5", "6"].includes(item.id)
+      );
+      addConversation(
+        "Quais são as opções sem carne?",
+        `Temos estas opções sem carne: ${vegetarianOptions.map((item) => item.name).join(", ")}. Confira os ingredientes e escolha sua favorita! 🌿`
+      );
+      return;
+    }
+
+    if (action === "bestSeller") {
+      const bestSeller = PRODUCTS.find((item) => item.id === "1");
+      addConversation(
+        "Qual é o mais vendido do dia?",
+        `O mais vendido de hoje é o ${bestSeller.name}! 🏆 Quer experimentar?`,
+        bestSeller
+      );
+      return;
+    }
+
+    if (action === "add" && product) {
+      // Abre a tela de detalhes para escolher ingredientes a retirar,
+      // observações e quantidade antes de colocar no carrinho.
+      openProduct(product);
+      return;
+    }
+
+    if (action === "cart") {
+      if (cart.length === 0) {
+        addConversation(
+          "Quero finalizar meu pedido",
+          "Seu carrinho ainda está vazio. Abra o cardápio e escolha uma massa para começar! 😊"
+        );
+        return;
+      }
+      addConversation(
+        "Quero revisar meu carrinho",
+        "Perfeito! Vou abrir seu carrinho para você conferir os itens e finalizar a compra. 🛒"
+      );
+      navigate("cart");
+      return;
+    }
+
+    if (action === "orders") {
+      const latestOrder = orders[0];
+      addConversation(
+        "Como está meu pedido?",
+        latestOrder
+          ? `Seu pedido mais recente é o #${latestOrder.id} e está com o status: ${latestOrder.status}. 📦`
+          : "Você ainda não tem pedidos por aqui. Assim que fizer seu primeiro pedido, poderá acompanhar o andamento nesta conversa! 😊"
+      );
+      return;
+    }
+
+    if (action === "dessert") {
+      const dessert = PRODUCTS.find((item) => item.category === "Sobremesas");
+      addConversation(
+        "Quais sobremesas vocês têm?",
+        dessert
+          ? `Temos ${dessert.name}! Uma ótima opção para terminar sua refeição. 🍰`
+          : "No momento não há sobremesas disponíveis no cardápio."
+      );
+    }
+  };
+
   const renderChat = () => (
     <View style={{ flex: 1 }}>
-      <Header title="Pastechat 🤖" subtitle="Seu amigo das massas" />
+      <Header title="Pastechat 🤖" subtitle="Seu atendente virtual" />
 
       <View style={styles.chatWelcome}>
         <Text style={{ fontSize: 35 }}>🐔</Text>
         <View style={{ flex: 1 }}>
-          <Text style={styles.featureTitle}>Olá! Sou o Pastechat.</Text>
+          <Text style={styles.featureTitle}>Olá! Sou o Pastechat!</Text>
           <Text style={styles.mutedText}>
-            Posso ajudar você a descobrir novos sabores.
+            Toque em uma das perguntas para receber ajuda com seu pedido.
           </Text>
         </View>
       </View>
 
       <ScrollView
         style={styles.chatMessages}
-        contentContainerStyle={{ paddingBottom: 15 }}
+        contentContainerStyle={{ paddingBottom: 18 }}
       >
         {chatMessages.map((message, index) => (
-          <View
-            key={index}
-            style={[
-              styles.chatBubble,
-              message.from === "user"
-                ? styles.chatBubbleUser
-                : styles.chatBubbleBot,
-            ]}
-          >
-            <Text
+          <View key={index}>
+            <View
               style={[
-                styles.chatText,
-                message.from === "user" && styles.chatTextUser,
+                styles.chatBubble,
+                message.from === "user"
+                  ? styles.chatBubbleUser
+                  : styles.chatBubbleBot,
               ]}
             >
-              {message.text}
-            </Text>
+              <Text
+                style={[
+                  styles.chatText,
+                  message.from === "user" && styles.chatTextUser,
+                ]}
+              >
+                {message.text}
+              </Text>
+            </View>
+
+            {message.from === "bot" && message.suggestedProduct && (
+              <View style={styles.chatSuggestedProduct}>
+                <Text style={styles.chatProductEmoji}>
+                  {message.suggestedProduct.emoji}
+                </Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.chatProductName}>
+                    {message.suggestedProduct.name}
+                  </Text>
+                  <Text style={styles.chatProductPrice}>
+                    {money(message.suggestedProduct.price)}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.chatAddButton}
+                  onPress={() =>
+                    handlePastechatAction("add", message.suggestedProduct)
+                  }
+                >
+                  <Text style={styles.chatAddButtonText}>Adicionar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         ))}
 
-        <Text style={styles.chatSuggestionsTitle}>Sugestões para começar</Text>
-
-        {[
-          "Qual massa você recomenda?",
-          "Quais são as opções sem carne?",
-          "Quero uma sobremesa!",
-          "Como está meu pedido?",
-        ].map((suggestion) => (
+        <Text style={styles.chatSuggestionsTitle}>COMO POSSO TE AJUDAR?</Text>
+        <View style={styles.chatQuestionList}>
           <TouchableOpacity
-            key={suggestion}
-            onPress={() => {
-              setChatInput(suggestion);
-            }}
-            style={styles.suggestionChip}
+            style={styles.chatQuestionButton}
+            onPress={() => handlePastechatAction("recommend")}
           >
-            <Text style={styles.suggestionText}>{suggestion}</Text>
+            <Text style={styles.chatQuestionIcon}>🍝</Text>
+            <Text style={styles.chatQuestionText}>Qual massa você recomenda?</Text>
+            <Text style={styles.chatQuestionArrow}>›</Text>
           </TouchableOpacity>
-        ))}
-      </ScrollView>
 
-      <View style={styles.chatInputRow}>
-        <TextInput
-          style={[styles.input, styles.chatInput]}
-          placeholder="Escreva sua mensagem..."
-          placeholderTextColor={COLORS.gray}
-          value={chatInput}
-          onChangeText={setChatInput}
-          onSubmitEditing={sendChatMessage}
-          returnKeyType="send"
-        />
+          <TouchableOpacity
+            style={styles.chatQuestionButton}
+            onPress={() => handlePastechatAction("vegetarian")}
+          >
+            <Text style={styles.chatQuestionIcon}>🌿</Text>
+            <Text style={styles.chatQuestionText}>Quais opções temos sem carne?</Text>
+            <Text style={styles.chatQuestionArrow}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.chatQuestionButton}
+            onPress={() => handlePastechatAction("orders")}
+          >
+            <Text style={styles.chatQuestionIcon}>📦</Text>
+            <Text style={styles.chatQuestionText}>Como está meu pedido?</Text>
+            <Text style={styles.chatQuestionArrow}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.chatQuestionButton}
+            onPress={() => handlePastechatAction("bestSeller")}
+          >
+            <Text style={styles.chatQuestionIcon}>🏆</Text>
+            <Text style={styles.chatQuestionText}>Qual é o mais vendido do dia?</Text>
+            <Text style={styles.chatQuestionArrow}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.chatQuestionButton}
+            onPress={() => handlePastechatAction("dessert")}
+          >
+            <Text style={styles.chatQuestionIcon}>🍰</Text>
+            <Text style={styles.chatQuestionText}>Quais sobremesas vocês têm?</Text>
+            <Text style={styles.chatQuestionArrow}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.chatQuestionButton, styles.chatMenuQuestion]}
+            onPress={() => handlePastechatAction("menu")}
+          >
+            <Text style={styles.chatQuestionIcon}>📖</Text>
+            <Text style={styles.chatQuestionText}>
+              {chatMenuVisible ? "Ocultar cardápio" : "Ver cardápio completo"}
+            </Text>
+            <Text style={styles.chatQuestionArrow}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        {chatMenuVisible && (
+          <View style={styles.chatMenuPanel}>
+            <Text style={styles.chatMenuTitle}>CARDÁPIO GANA PASTA</Text>
+            {PRODUCTS.map((product) => (
+              <View key={product.id} style={styles.chatProductRow}>
+                <Text style={styles.chatProductEmoji}>{product.emoji}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.chatProductName}>{product.name}</Text>
+                  <Text style={styles.chatProductPrice}>
+                    {money(product.price)}
+                  </Text>
+                  <Text style={styles.chatProductDescription}>
+                    {product.description}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.chatAddButton}
+                  onPress={() => handlePastechatAction("add", product)}
+                >
+                  <Text style={styles.chatAddButtonText}>Adicionar</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
 
         <TouchableOpacity
-          style={styles.chatSendButton}
-          onPress={sendChatMessage}
+          style={styles.chatCheckoutButton}
+          onPress={() => handlePastechatAction("cart")}
         >
-          <Text style={styles.chatSendText}>➤</Text>
+          <Text style={styles.chatCheckoutButtonText}>
+            🛒  Revisar carrinho e finalizar
+          </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </View>
   );
-
   const renderProfile = () => (
     <ScrollView>
       <Header title="Minha conta" />
@@ -1280,50 +1712,12 @@ export default function App() {
             {user ? user.email : "Entre ou crie sua conta"}
           </Text>
 
-          {!user ? (
-            <>
-              <TextInput
-                style={styles.input}
-                placeholder="Seu nome (opcional)"
-                placeholderTextColor={COLORS.gray}
-                value={nameInput}
-                onChangeText={setNameInput}
-              />
-
-              <TextInput
-                style={styles.input}
-                placeholder="E-mail"
-                placeholderTextColor={COLORS.gray}
-                value={emailInput}
-                onChangeText={setEmailInput}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-
-              <TextInput
-                style={styles.input}
-                placeholder="Senha"
-                placeholderTextColor={COLORS.gray}
-                value={passwordInput}
-                onChangeText={setPasswordInput}
-                secureTextEntry
-              />
-
-              <Button
-                title="Entrar / Criar conta"
-                onPress={login}
-                style={{ marginTop: 5 }}
-              />
-
-            </>
-          ) : (
-            <Button
-              title="Sair da conta"
-              variant="outline"
-              onPress={logout}
-              style={{ marginTop: 15 }}
-            />
-          )}
+          <Button
+            title="Sair da conta"
+            variant="outline"
+            onPress={logout}
+            style={{ marginTop: 15 }}
+          />
         </View>
 
         <View style={styles.pointsCard}>
@@ -1372,17 +1766,7 @@ export default function App() {
           <Text style={styles.menuLinkArrow}>›</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.menuLink}
-          onPress={() => {
-            setAdminMode(!adminMode);
-            navigate("admin");
-          }}
-        >
-          <Text style={styles.menuLinkIcon}>⚙️</Text>
-          <Text style={styles.menuLinkText}>Área administrativa</Text>
-          <Text style={styles.menuLinkArrow}>›</Text>
-        </TouchableOpacity>
+
       </View>
     </ScrollView>
   );
@@ -1402,33 +1786,53 @@ export default function App() {
 
         <Text style={styles.sectionTitle}>Escolha seu plano</Text>
 
-        <View style={styles.planCard}>
-          <Text style={styles.planName}>Plano Classico</Text>
-          <Text style={styles.planPrice}>R$ 39,90/mês</Text>
-          <Text style={styles.planDescription}>
-            • Uma experiência especial por mês{"\n"}
-            • Promoções exclusivas{"\n"}
-            • Pontos extras em campanhas{"\n"}
-            • Novidades do cardápio
-          </Text>
-
-          <Button
-            title={clubActive ? "Plano ativado ✓" : "Escolher plano"}
-            onPress={() => {
-              setClubActive(!clubActive);
-              showNotice(
-                clubActive
-                  ? "Plano desativado na demonstração."
-                  : "Plano ativado na demonstração! Nenhuma cobrança será realizada."
-              );
-            }}
-            variant={clubActive ? "secondary" : "gold"}
-          />
-        </View>
+        {[
+          {
+            id: "classico",
+            name: "Plano Classico",
+            price: "R$ 39,90/mês",
+            description: "• Uma experiência especial por mês\n• Promoções exclusivas\n• Pontos extras em campanhas\n• Novidades do cardápio",
+            highlight: "Para começar",
+          },
+          {
+            id: "familia",
+            name: "Plano Famiglia",
+            price: "R$ 69,90/mês",
+            description: "• Duas massas por mês\n• 10% de desconto em pedidos\n• Pontos em dobro\n• Acesso antecipado às novidades",
+            highlight: "Mais vantagens",
+          },
+          {
+            id: "premium",
+            name: "Plano Premium",
+            price: "R$ 99,90/mês",
+            description: "• Três massas por mês\n• 15% de desconto em pedidos\n• Pontos em dobro\n• Uma sobremesa especial por mês\n• Ofertas exclusivas",
+            highlight: "Experiência completa",
+          },
+        ].map((plan) => {
+          const isSelected = selectedClubPlan === plan.id;
+          return (
+            <View key={plan.id} style={styles.planCard}>
+              <Text style={styles.planHighlight}>{plan.highlight}</Text>
+              <Text style={styles.planName}>{plan.name}</Text>
+              <Text style={styles.planPrice}>{plan.price}</Text>
+              <Text style={styles.planDescription}>{plan.description}</Text>
+              <Button
+                title={isSelected ? "Plano selecionado ✓" : "Escolher plano"}
+                onPress={() => {
+                  setSelectedClubPlan(plan.id);
+                  setClubActive(true);
+                  showNotice(
+                    `${plan.name} selecionado na demonstração. Nenhuma cobrança será realizada.`
+                  );
+                }}
+                variant={isSelected ? "secondary" : "gold"}
+              />
+            </View>
+          );
+        })}
       </View>
     </ScrollView>
   );
-
   const renderShared = () => (
     <ScrollView>
       <Header title="Pedido compartilhado" subtitle="A melhor massa é aquela dividida!" />
@@ -1581,7 +1985,7 @@ export default function App() {
             onPress={() => {
               showNotice("Obrigado por avaliar a GANA Pasta!");
               setFeedback("");
-              setScreen("home");
+              navigate("home");
             }}
             style={{ marginTop: 15 }}
           />
@@ -1592,12 +1996,16 @@ export default function App() {
 
   const renderScreen = () => {
     switch (screen) {
+      case "login":
+        return renderLogin();
       case "home":
         return renderHome();
       case "menu":
         return renderMenu();
       case "product":
         return renderProduct();
+      case "afterAdd":
+        return renderAfterAdd();
       case "cart":
         return renderCart();
       case "orders":
@@ -1612,8 +2020,6 @@ export default function App() {
         return renderShared();
       case "feedback":
         return renderFeedback();
-      case "admin":
-        return renderAdmin();
       default:
         return renderHome();
     }
@@ -1624,9 +2030,9 @@ export default function App() {
       <StatusBar backgroundColor={COLORS.darkRed} barStyle="light-content" />
 
       <View style={styles.appContainer}>
-        <View style={styles.screenContainer}>{renderScreen()}</View>
+        <View style={styles.screenContainer}>{user ? renderScreen() : renderLogin()}</View>
 
-        <View style={styles.bottomNav}>
+        {user && <View style={styles.bottomNav}>
           {[
             { id: "home", icon: "🏠", label: "Início" },
             { id: "menu", icon: "🍝", label: "Cardápio" },
@@ -1637,7 +2043,7 @@ export default function App() {
             <TouchableOpacity
               key={item.id}
               style={styles.navItem}
-              onPress={() => setScreen(item.id)}
+              onPress={() => navigate(item.id)}
             >
               <Text style={styles.navIcon}>{item.icon}</Text>
               <Text
@@ -1652,13 +2058,64 @@ export default function App() {
               {screen === item.id && <View style={styles.navIndicator} />}
             </TouchableOpacity>
           ))}
-        </View>
+        </View>}
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  authContainer: {
+    flexGrow: 1,
+    justifyContent: "center",
+    padding: 22,
+    backgroundColor: COLORS.cream,
+  },
+  authCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "stretch",
+    borderWidth: 1,
+    borderColor: "#EEE5D8",
+  },
+  authLogo: {
+    alignSelf: "center",
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    backgroundColor: "#FFF0D0",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  authBrand: {
+    color: COLORS.red,
+    fontSize: 27,
+    fontWeight: "900",
+    textAlign: "center",
+    letterSpacing: 2,
+  },
+  authSubtitle: {
+    color: COLORS.gray,
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 6,
+    marginBottom: 26,
+  },
+  authTitle: {
+    color: COLORS.dark,
+    fontSize: 18,
+    fontWeight: "900",
+    marginBottom: 15,
+  },
+  authHint: {
+    color: COLORS.gray,
+    fontSize: 10,
+    textAlign: "center",
+    marginTop: 15,
+    lineHeight: 15,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.cream,
@@ -2450,31 +2907,7 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginTop: 6,
   },
-
-  adminStatusButton: {
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#E7DFD5",
-    borderRadius: 10,
-    marginTop: 6,
-  },
-
-  adminStatusButtonActive: {
-    backgroundColor: COLORS.red,
-    borderColor: COLORS.red,
-  },
-
-  adminStatusText: {
-    color: COLORS.dark,
-    fontSize: 12,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-
-  adminStatusTextActive: {
-    color: COLORS.white,
-  },
-
+  
   chatWelcome: {
     flexDirection: "row",
     alignItems: "center",
@@ -2541,6 +2974,170 @@ const styles = StyleSheet.create({
     color: COLORS.darkRed,
     fontSize: 12,
     fontWeight: "600",
+  },
+
+  chatQuestionList: {
+    gap: 9,
+    marginBottom: 14,
+  },
+
+  chatQuestionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.white,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "#E9DFD1",
+    paddingVertical: 13,
+    paddingHorizontal: 12,
+    gap: 10,
+  },
+
+  chatQuestionIcon: {
+    fontSize: 19,
+  },
+
+  chatQuestionText: {
+    flex: 1,
+    color: COLORS.dark,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  chatQuestionArrow: {
+    color: COLORS.red,
+    fontSize: 22,
+    fontWeight: "700",
+  },
+
+  chatMenuQuestion: {
+    backgroundColor: "#FFF5DD",
+    borderColor: COLORS.gold,
+  },
+
+  chatSuggestedProduct: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.white,
+    borderRadius: 13,
+    padding: 10,
+    marginTop: -5,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#EEE5D8",
+    gap: 9,
+  },
+
+  chatMenuPanel: {
+    backgroundColor: "#FFFDF8",
+    borderWidth: 1,
+    borderColor: "#E9DFD1",
+    borderRadius: 14,
+    padding: 10,
+    marginBottom: 12,
+  },
+
+  chatMenuTitle: {
+    color: COLORS.darkRed,
+    fontSize: 13,
+    fontWeight: "900",
+    marginBottom: 10,
+    letterSpacing: 0.5,
+  },
+
+  chatProductDescription: {
+    color: COLORS.gray,
+    fontSize: 10,
+    marginTop: 3,
+    lineHeight: 14,
+  },
+
+  chatQuickActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 12,
+  },
+
+  chatQuickButton: {
+    width: "48%",
+    minHeight: 74,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: "#E7DFD5",
+    padding: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  chatQuickEmoji: {
+    fontSize: 21,
+    marginBottom: 4,
+  },
+
+  chatQuickText: {
+    fontSize: 11,
+    color: COLORS.darkRed,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+
+  chatProductRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: COLORS.white,
+    borderRadius: 13,
+    padding: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#EEE5D8",
+    gap: 9,
+  },
+
+  chatProductEmoji: {
+    fontSize: 27,
+  },
+
+  chatProductName: {
+    color: COLORS.dark,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  chatProductPrice: {
+    color: COLORS.gray,
+    fontSize: 11,
+    marginTop: 3,
+  },
+
+  chatAddButton: {
+    backgroundColor: COLORS.red,
+    borderRadius: 9,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+  },
+
+  chatAddButtonText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+
+  chatCheckoutButton: {
+    backgroundColor: COLORS.gold,
+    borderRadius: 13,
+    padding: 14,
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 12,
+  },
+
+  chatCheckoutButtonText: {
+    color: COLORS.darkRed,
+    fontSize: 12,
+    fontWeight: "800",
   },
 
   chatInputRow: {
@@ -2679,6 +3276,43 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
 
+  afterAddContent: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingBottom: 40,
+  },
+
+  afterAddTitle: {
+    color: COLORS.darkRed,
+    fontSize: 21,
+    fontWeight: "900",
+    textAlign: "center",
+    marginTop: 14,
+  },
+
+  afterAddDescription: {
+    color: COLORS.gray,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: "center",
+    marginTop: 9,
+    maxWidth: 280,
+  },
+
+  planHighlight: {
+    color: COLORS.darkRed,
+    backgroundColor: "#FFF0D0",
+    alignSelf: "flex-start",
+    borderRadius: 20,
+    overflow: "hidden",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    fontSize: 10,
+    fontWeight: "800",
+    marginBottom: 9,
+  },
+
   planCard: {
     backgroundColor: COLORS.white,
     borderRadius: 18,
@@ -2771,76 +3405,7 @@ const styles = StyleSheet.create({
     marginVertical: 18,
     gap: 8,
   },
-
-  adminBanner: {
-    backgroundColor: COLORS.darkRed,
-    borderRadius: 18,
-    padding: 20,
-    alignItems: "center",
-    marginBottom: 18,
-  },
-
-  adminBannerTitle: {
-    color: COLORS.white,
-    fontSize: 20,
-    fontWeight: "900",
-    marginTop: 10,
-  },
-
-  adminBannerText: {
-    color: "#F6D9D8",
-    fontSize: 12,
-    lineHeight: 18,
-    textAlign: "center",
-    marginTop: 8,
-  },
-
-  adminStatsRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 25,
-  },
-
-  adminStatCard: {
-    flex: 1,
-    backgroundColor: COLORS.white,
-    borderRadius: 13,
-    paddingVertical: 16,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#EEE5D8",
-  },
-
-  adminStatNumber: {
-    color: COLORS.red,
-    fontSize: 23,
-    fontWeight: "900",
-  },
-
-  adminStatLabel: {
-    color: COLORS.gray,
-    fontSize: 10,
-    marginTop: 5,
-  },
-
-  adminProductRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: COLORS.white,
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#EEE5D8",
-  },
-
-  deleteText: {
-    color: COLORS.red,
-    fontSize: 12,
-    fontWeight: "900",
-    padding: 8,
-  },
-
+  
   bottomNav: {
     height: 66,
     backgroundColor: COLORS.white,
